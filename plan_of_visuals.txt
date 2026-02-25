@@ -3,3 +3,5 @@ run an analysis of what has changed in the commute shed from that area- how many
 could run a commute time analysis using the mapbox dataset
 est time to get to work
 the aim of the analysis is just to show "did u know that this many people work in these distance bands?'or something
+
+not only has the quantity of jobs in these neighborhoods changed, so too has the distribution of those jobs
