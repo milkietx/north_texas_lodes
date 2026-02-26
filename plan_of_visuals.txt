@@ -5,3 +5,24 @@ est time to get to work
 the aim of the analysis is just to show "did u know that this many people work in these distance bands?'or something
 
 not only has the quantity of jobs in these neighborhoods changed, so too has the distribution of those jobs
+
+#healthcare employment in north texas is highly concentrated
+#healthcar growth is also strongly correlated with employment growth
+#existing health care nodes -> expanding
+#new health care nodes -> growing
+#mix of jobs is generally quite positive in terms of pay
+#healthcare areas with most jobs added  (2010-2025)
+    #identify and name them and show on the map
+#an interesting factor about healthcare employment growth is that it is also reflected in changing residential patterns
+#take UTSW - the people who work in these critical employment blocks has changed from 2010 to 2025
+#the way the workforce looked in 2010 is like this:
+#the way the workforce looked in 2025 is like this:
+#and is this different for young workers? 
+#where young workers lived in 2010 vs where young workers live in 2025
+#if young workers lived in the same pattern as 2010 there would be workers in these locations:
+XXXXX
+#but what we see is instead, those workers in these locations:
+XXXXX
+#these are areas that have seen rapid growth in apartment construction
+#in other words, the housing production system is highly tied to the availabiliy and access to employment
+#and put yet another way, cities lose out on potential add-on effects from employment zones when their housing stock is inadequate
