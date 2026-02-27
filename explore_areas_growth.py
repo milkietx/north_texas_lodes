@@ -12,7 +12,7 @@ spath = r"C:\Users\cmg0530\Projects\lodes_package\lodes_tx_slim.db"
 con,cur = connect_to_od(spath=spath)
 
 #get time of day for dfw
-total_employment = census_pull(tables=["C24020"],geom="tract",year="2022")
+total_employment = census_pull(tables=["C24020"],geom="tract",year="2023")
 
 #dfw counties
 dfw_counties = ['085','113','121','139','143',
@@ -28,7 +28,7 @@ cw_mapdict = dict(zip(dfw_cw_blks['tabblk2020'],dfw_cw_blks['GEOID']))
 #get od data for the dfw_cw_blks in 2022 and 2012
 
 dfs = []
-for y in ['2012','2017','2022']:
+for y in ['2013','2018','2023']:
     q = generate_query(data_type='od',
                        perspective='home',
                        job_type='primary',
