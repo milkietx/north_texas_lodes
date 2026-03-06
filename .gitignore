@@ -1,0 +1,5 @@
+# Ignore sqlite and env files
+*.gpkg
+
+# Ignore databases folder
+Data Storage

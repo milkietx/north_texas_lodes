@@ -45,9 +45,10 @@ hc_gdf.drop(columns='geom_wkt',inplace=True)
 
 #define majority healthcare tracts plus adjacent tracts with over 100+ employees
 #spatial autocorrelation
-def major_industry(gdf=hc_gdf,industry='tot'):
+def major_industry(gdf=hc_gdf,industry='Health_62'):
     import libpysal as lp
     import esda
+    import matplotlib.pyplot  as plt
     wq =  lp.weights.Queen.from_dataframe(gdf)
     wq.transform = 'r'
     y = gdf[industry]
@@ -71,7 +72,8 @@ def major_industry(gdf=hc_gdf,industry='tot'):
     hmap = colors.ListedColormap(["red", "lightgrey"])
     f, ax = plt.subplots(1, figsize=(9, 9))
     df = df.to_crs("EPSG:3857")
-    df.assign(cl=labels).plot(
+    df = df.assign(cl=labels)
+    df.plot(
         column="cl",
         categorical=True,
         k=2,
@@ -87,81 +89,10 @@ def major_industry(gdf=hc_gdf,industry='tot'):
     ax.axis("off")
     plt.show()
 
+    df.to_file(r"C:\Users\cmg0530\Projects\lodes_north_texas\north_texas_lodes\Data Storage\Zones.gpkg",
+               layer='HealthCare_Zones_v1')
 
 
     gdf['Health_62'].describe()
-
-#adjusted destiantion for acs
-adj_dict = dict(zip(dfw_tdata['GEOID'],dfw_tdata['C24020_001E']))
-od_pivot['origin_total_acs2024'] = od_pivot['orig_tract'].map(adj_dict)
-
-#example of utsw analysis
-utsw = ['48113010001','48113000409','48113000401']
-
-med_dist_commute = od_pivot.query("dest_tract in @utsw")
-med_dist_commute['expected_from_2012_proportions_val2024'] = med_dist_commute['proportion_of_origin_to_dest_2012'].fillna(0) * med_dist_commute['origin_total_acs2024'] 
-med_dist_commute['expected_from_2022_proportions_val2024'] = med_dist_commute['proportion_of_origin_to_dest_2022'].fillna(0) * med_dist_commute['origin_total_acs2024'] 
-med_dist_commute['difference_2012_2022_val2024'] = med_dist_commute['expected_from_2022_proportions_val2024'] - med_dist_commute['expected_from_2012_proportions_val2024']
-med_dist_gb = med_dist_commute.groupby('orig_tract').agg({'total_2012':'sum',
-                                            'total_2022':'sum',
-                                            'expected_from_2012_proportions_val2024':'sum',
-                                            'expected_from_2022_proportions_val2024':'sum',
-                                            'difference_2012_2022_val2024':'sum'
-                                            })
-
-t20 = pd.read_sql(r"select ST_AsText(geom) as geom_wkt, geoid from tracts_2020_geom",con=con)
-t20 = gpd.GeoDataFrame(t20,geometry=gpd.GeoSeries.from_wkt(t20['geom_wkt']),crs='epsg:4326')
-t20.drop(columns='geom_wkt',inplace=True)
-
-sdata = t20.merge(med_dist_gb,left_on='GEOID',right_on='orig_tract')
-sdata = sdata.to_crs("EPSG:3857")
-
-
-import mapclassify
-import matplotlib.patheffects as pe
-import matplotlib.pyplot as plt
-import contextily as ctx
-
-def quickplot():
-    fig, ax = plt.subplots(1, 1, figsize=(19, 19))
-    print("Plotting...")
-    sdata.query("difference_2012_2022_val2024 > -25").plot(
-        ax=ax,
-        column="difference_2012_2022_val2024",
-        cmap="magma",
-        alpha=0.8,
-        linewidth=2,
-        zorder=4,
-        legend=True,
-        legend_kwds={"shrink": 0.3} ,)
-    
-    sdata.query('GEOID in @utsw').dissolve().plot(
-        ax=ax,
-        cmap="viridis",
-        alpha=0.8,
-        linewidth=1,
-        facecolor=None,
-        edgecolor='#FF0000',
-        zorder=7,
-        legend=True,
-        legend_kwds={"shrink": 0.3} ,)
-
-
-    
-    #xmin, ymin, xmax, ymax = sdata.geometry.total_bounds
-    #farther
-    #xmin, ymin, xmax, ymax = [-10869027.941352,3821862.042989,-10711378.159285,3932572.978240]
-    #close
-    xmin, ymin, xmax, ymax = [-10847756.368917,3834478.418943,-10737203.292594,3918201.362709]
-    ax.set_xlim(xmin, xmax)
-    ax.set_ylim(ymin, ymax)
-    ax.axis("off")
-    fig.tight_layout()
-    ctx.add_basemap(ax=ax, source=ctx.providers.CartoDB.PositronOnlyLabels, zorder=8)
-    ctx.add_basemap(ax=ax, source=ctx.providers.CartoDB.PositronNoLabels, zorder=3)
-    plt.show()
-
-
-quickplot(orig_geoid=f"48113013500")
 
 
