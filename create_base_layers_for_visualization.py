@@ -28,78 +28,79 @@ dfw_cw_blks = cw.merge(dfw_tdata,left_on='trct',right_on=['GEOID'])[['tabblk2020
 cw_mapdict = dict(zip(dfw_cw_blks['tabblk2020'],dfw_cw_blks['GEOID']))
 
 #get healthcare concentrations
+all_y = []
+for y in ['2008','2013','2018','2023']:
+    q = generate_query(data_type='rac',
+                        job_type='primary',
+                        year=y,
+                        geocodes=dfw_cw_blks['tabblk2020'].unique().tolist())
+    rac_df = pull_data(query=q,crsr=cur,rename=True)
 
-q = generate_query(data_type='rac',
-                       job_type='primary',
-                       year='2023',
-                       geocodes=dfw_cw_blks['tabblk2020'].unique().tolist())
-rac_df = pull_data(query=q,crsr=cur,rename=True)
+    q = generate_query(data_type='wac',
+                        job_type='primary',
+                        year=y,
+                        geocodes=dfw_cw_blks['tabblk2020'].unique().tolist())
+    wac_df = pull_data(query=q,crsr=cur,rename=True)
 
-q = generate_query(data_type='wac',
-                       job_type='primary',
-                       year='2023',
-                       geocodes=dfw_cw_blks['tabblk2020'].unique().tolist())
-wac_df = pull_data(query=q,crsr=cur,rename=True)
+    lodes_df = pd.merge(wac_df,
+                        rac_df,
+                        left_on='w_geocode',
+                        right_on='h_geocode',
+                        suffixes=('_wac','_rac'),
+                        how='outer').fillna(0)
+    lodes_df['geocode'] = lodes_df.apply(lambda x: x['w_geocode'] if x['h_geocode'] == 0 else x['h_geocode'],axis=1)
 
+    lodes_df['year'] = y
+    all_y.append(lodes_df)
+
+all_y_single = pd.concat(all_y)
+all_y_piv = all_y_single.pivot(index=['geocode'],
+             columns=['year'])
+            
+rev_columns = [f"{x[0]}_{x[1]}" for x in all_y_piv.columns]
+all_y_piv.columns = rev_columns
+
+all_y_piv = all_y_piv.drop(columns=['w_geocode_2008',
+ 'w_geocode_2013',
+ 'w_geocode_2018',
+ 'w_geocode_2023',
+ 'h_geocode_2008',
+ 'h_geocode_2013',
+ 'h_geocode_2018',
+ 'h_geocode_2023',
+ 'year_wac_2008',
+ 'year_wac_2013',
+ 'year_wac_2018',
+ 'year_wac_2023',
+  'year_rac_2008',
+ 'year_rac_2013',
+ 'year_rac_2018',
+ 'year_rac_2023'])
 
 b20 = pd.read_sql(r"select ST_AsText(geom) as geom_wkt, geocode from blocks_2020_geom",con=con)
 b20 = gpd.GeoDataFrame(b20,geometry=gpd.GeoSeries.from_wkt(b20['geom_wkt']),crs='epsg:4326')
 b20['county'] = b20['geocode'].str[2:5]
 dfw20 = b20.query("county in @dfw_counties")
 
-hc_gdf = dfw20.merge(hc_df,left_on='geocode',right_on='w_geocode',how='left').fillna(0)
-hc_gdf.drop(columns='geom_wkt',inplace=True)
+lodes_dfw = dfw20.merge(all_y_piv,left_on='geocode',right_on='geocode',how='left').fillna(0)
 
-#define majority healthcare tracts plus adjacent tracts with over 100+ employees
-#spatial autocorrelation
-def major_industry(gdf=hc_gdf,industry='Health_62'):
-    import libpysal as lp
-    import esda
-    import matplotlib.pyplot  as plt
-    wq =  lp.weights.Queen.from_dataframe(gdf)
-    wq.transform = 'r'
-    y = gdf[industry]
-    ylag = lp.weights.lag_spatial(wq, y)
-    
-    li = esda.moran.Moran_Local(y, wq)
-    (li.p_sim < 0.05).sum()
+#get density of jobs 
+#get density of employment
+lodes_dfw = lodes_dfw.to_crs("EPSG:2276")
+lodes_dfw['area_sqmi'] = lodes_dfw.area/(5280*5280)
+lodes_dfw['wf_per_sqmi_2023'] = lodes_dfw['tot_rac_2023']/lodes_dfw['area_sqmi']
+lodes_dfw['jobs_per_sqmi_2023'] = lodes_dfw['tot_wac_2023']/lodes_dfw['area_sqmi']
+lodes_dfw['wf_per_sqmi_2018'] = lodes_dfw['tot_rac_2018']/lodes_dfw['area_sqmi']
+lodes_dfw['jobs_per_sqmi_2018'] = lodes_dfw['tot_wac_2018']/lodes_dfw['area_sqmi']
+lodes_dfw['wf_per_sqmi_2013'] = lodes_dfw['tot_rac_2013']/lodes_dfw['area_sqmi']
+lodes_dfw['jobs_per_sqmi_2013'] = lodes_dfw['tot_wac_2013']/lodes_dfw['area_sqmi']
+lodes_dfw['wf_per_sqmi_2008'] = lodes_dfw['tot_rac_2008']/lodes_dfw['area_sqmi']
+lodes_dfw['jobs_per_sqmi_2008'] = lodes_dfw['tot_wac_2008']/lodes_dfw['area_sqmi']
 
-    sig = li.p_sim < 0.05
-    hotspot = sig * li.q == 1
-    coldspot = sig * li.q == 3
-    doughnut = sig * li.q == 2
-    diamond = sig * li.q == 4
+lodes_dfw = lodes_dfw.to_crs("EPSG:3857")
 
-    spots = ["n.sig.", "hot spot"]
-    labels = [spots[i] for i in hotspot * 1]
-
-    df = gdf
-    from matplotlib import colors
-
-    hmap = colors.ListedColormap(["red", "lightgrey"])
-    f, ax = plt.subplots(1, figsize=(9, 9))
-    df = df.to_crs("EPSG:3857")
-    df = df.assign(cl=labels)
-    df.plot(
-        column="cl",
-        categorical=True,
-        k=2,
-        cmap=hmap,
-        linewidth=0.1,
-        ax=ax,
-        edgecolor="white",
-        legend=True,
-    )
-    xmin, ymin, xmax, ymax = [-10847756.368917,3834478.418943,-10737203.292594,3918201.362709]
-    ax.set_xlim(xmin, xmax)
-    ax.set_ylim(ymin, ymax)
-    ax.axis("off")
-    plt.show()
-
-    df.to_file(r"C:\Users\cmg0530\Projects\lodes_north_texas\north_texas_lodes\Data Storage\Zones.gpkg",
-               layer='HealthCare_Zones_v1')
+lodes_dfw.to_file(r"C:\Users\cmg0530\Projects\lodes_north_texas\north_texas_lodes\Data Storage\Zones.gpkg",
+               layer='Background_LODES_v1')
 
 
-    gdf['Health_62'].describe()
-
-
+lodes_dfw['wf_per_sqmi_2023'].quantile(.4)

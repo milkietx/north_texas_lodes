@@ -11,48 +11,53 @@ import geopandas as gpd
 spath = r"C:\Users\cmg0530\Projects\lodes_package\lodes_tx_slim.db"
 con,cur = connect_to_od(spath=spath)
 
-#get total residential employment for 2023
-total_employment = census_pull(tables=["C24020"],geom="tract",year="2023")
+def prep_employment_data():
+    #get total residential employment for 2023
+    total_employment = census_pull(tables=["C24020"],geom="tract",year="2023")
 
-#dfw counties
-dfw_counties = ['085','113','121','139','143',
-                '221','231','251','257','349',
-                '363','367','397','425','439','497']
+    #dfw counties
+    dfw_counties = ['085','113','121','139','143',
+                    '221','231','251','257','349',
+                    '363','367','397','425','439','497']
 
-dfw_tdata = total_employment.query("county in @dfw_counties")
+    dfw_tdata = total_employment.query("county in @dfw_counties")
 
-#get crosswalked blocks
-cw = pd.read_sql("select tabblk2020, trct,trctname from tx_xwalk",con=con)
-dfw_cw_blks = cw.merge(dfw_tdata,left_on='trct',right_on=['GEOID'])[['tabblk2020','GEOID']]
-cw_mapdict = dict(zip(dfw_cw_blks['tabblk2020'],dfw_cw_blks['GEOID']))
+    #get crosswalked blocks
+    cw = pd.read_sql("select tabblk2020, trct,trctname from tx_xwalk",con=con)
+    dfw_cw_blks = cw.merge(dfw_tdata,left_on='trct',right_on=['GEOID'])[['tabblk2020','GEOID']]
+    cw_mapdict = dict(zip(dfw_cw_blks['tabblk2020'],dfw_cw_blks['GEOID']))
 
-#get city crosswalk
-cw = pd.read_sql("select tabblk2020,trct,stplcname,cty from tx_xwalk",con=con)
-cw['county_id'] = cw['cty'].str[2:5]
-dfw_cw_blks = cw[cw['county_id'].isin(dfw_counties)]
-city_mapdict = dict(zip(dfw_cw_blks['tabblk2020'],dfw_cw_blks['stplcname']))
+    #get city crosswalk
+    cw = pd.read_sql("select tabblk2020,trct,stplcname,cty from tx_xwalk",con=con)
+    cw['county_id'] = cw['cty'].str[2:5]
+    dfw_cw_blks = cw[cw['county_id'].isin(dfw_counties)]
+    city_mapdict = dict(zip(dfw_cw_blks['tabblk2020'],dfw_cw_blks['stplcname']))
 
 
-#get all the od data for 2013, 2018, and 2023
-dfs = []
-for y in ['2013','2018','2023']:
-    q = generate_query(data_type='od',
-                       perspective='home',
-                       job_type='primary',
-                       year=y,
-                       geocodes=dfw_cw_blks['tabblk2020'].unique().tolist())
-    od_df = pull_data(query=q,crsr=cur,rename=True)
-    retype(od_df)
-    od_df = od_df.fillna(0)
-    dfs.append(od_df)
+    #get all the od data for 2013, 2018, and 2023
+    dfs = []
+    for y in ['2013','2018','2023']:
+        q = generate_query(data_type='od',
+                        perspective='home',
+                        job_type='primary',
+                        year=y,
+                        geocodes=dfw_cw_blks['tabblk2020'].unique().tolist())
+        od_df = pull_data(query=q,crsr=cur,rename=True)
+        retype(od_df)
+        od_df = od_df.fillna(0)
+        dfs.append(od_df)
 
+        od_primary = pd.concat(dfs)
+    return od_primary,cw_mapdict,city_mapdict,dfw_cw_blks
+
+od_primary,cw_mapdict,city_mapdict,dfw_cw_blks = prep_employment_data()
 
 #read in the utsw blocks 
 utsw_blocks = gpd.read_file(r"C:\Users\cmg0530\Data Storage\GIS Data\LODES_StudyAreas.gdb", 
                             layer="UTSW_v1")
 utsw_dict = dict(zip(utsw_blocks['geocode'],['utsw'] * len(utsw_blocks['geocode'])))
 
-od_primary = pd.concat(dfs)
+
 od_primary['dest_tract'] = od_primary['w_geocode'].map(cw_mapdict)
 od_primary['orig_tract'] = od_primary['h_geocode'].map(cw_mapdict)
 od_primary['orig_city'] = od_primary['h_geocode'].map(city_mapdict)
