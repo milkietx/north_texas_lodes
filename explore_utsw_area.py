@@ -63,9 +63,10 @@ def assign_study_area(od_primary,layer_name="UTSW_v1"):
     study_area = gpd.read_file(r"C:\Users\cmg0530\Data Storage\GIS Data\LODES_StudyAreas.gdb", 
                                 layer=layer_name)
     study_area_dict = dict(zip(study_area['geocode'],[layer_name] * len(study_area['geocode'])))
-    od_primary['study_area'] = od_primary['w_geocode'].map(study_area_dict)
-    od_primary['study_area'] = od_primary['study_area'].fillna('not study area')
-    return od_primary
+    od_primary_2 = od_primary.copy()
+    od_primary_2['study_area'] = od_primary_2['w_geocode'].map(study_area_dict)
+    od_primary_2['study_area'] = od_primary_2['study_area'].fillna('not study area')
+    return od_primary_2
 
 
 #aggregate to tract level
@@ -144,11 +145,11 @@ for stuare in [od_primary_utsw,
                od_primary_medcity,
                od_primary_methodistftw,
                od_primary_presbydenton]:
-    od_set = aggregate_to_origin(stuare, geography='tract')
+    od_set = aggregate_to_origin(od_primary=stuare, geography='tract')
     od_pivot = adjust_od_set_by_year(od_set, geography='tract')
     od_pivot = adjust_to_acs(od_pivot,dfw_tdata)
     sdata = merge_in_geometry(od_pivot)
-    x = [y for y in list(od_pivot['study_area'].unique()) if y != 'not study area'][0]
+    x = [y for y in list(sdata['study_area'].unique()) if (y != 'not study area') and len(str(y)) > 2][0]
     od_frames[f"{x}_tract"] = sdata
     
     od_setc = aggregate_to_origin(stuare, geography='city')
