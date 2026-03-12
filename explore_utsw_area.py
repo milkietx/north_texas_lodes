@@ -48,142 +48,125 @@ def prep_employment_data():
         dfs.append(od_df)
 
         od_primary = pd.concat(dfs)
-    return od_primary,cw_mapdict,city_mapdict,dfw_cw_blks
+    return od_primary,cw_mapdict,city_mapdict,dfw_cw_blks,dfw_tdata
 
-od_primary,cw_mapdict,city_mapdict,dfw_cw_blks = prep_employment_data()
+def assign_tracts(od_primary,cw_mapdict,city_mapdict):
+    #assign tracts and origin city
+    od_primary['dest_tract'] = od_primary['w_geocode'].map(cw_mapdict)
+    od_primary['orig_tract'] = od_primary['h_geocode'].map(cw_mapdict)
+    od_primary['orig_city'] = od_primary['h_geocode'].map(city_mapdict)
+    return od_primary
 
-#read in the utsw blocks 
-utsw_blocks = gpd.read_file(r"C:\Users\cmg0530\Data Storage\GIS Data\LODES_StudyAreas.gdb", 
-                            layer="UTSW_v1")
-utsw_dict = dict(zip(utsw_blocks['geocode'],['utsw'] * len(utsw_blocks['geocode'])))
+
+#read in a study area and assign to od_primary
+def assign_study_area(od_primary,layer_name="UTSW_v1"):
+    study_area = gpd.read_file(r"C:\Users\cmg0530\Data Storage\GIS Data\LODES_StudyAreas.gdb", 
+                                layer=layer_name)
+    study_area_dict = dict(zip(study_area['geocode'],[layer_name] * len(study_area['geocode'])))
+    od_primary['study_area'] = od_primary['w_geocode'].map(study_area_dict)
+    od_primary['study_area'] = od_primary['study_area'].fillna('not study area')
+    return od_primary
 
 
-od_primary['dest_tract'] = od_primary['w_geocode'].map(cw_mapdict)
-od_primary['orig_tract'] = od_primary['h_geocode'].map(cw_mapdict)
-od_primary['orig_city'] = od_primary['h_geocode'].map(city_mapdict)
-od_primary['study_area'] = od_primary['w_geocode'].map(utsw_dict)
-od_primary['study_area'] = od_primary['study_area'].fillna('not utsw')
+#aggregate to tract level
+def aggregate_to_origin(od_primary,geography='tract'):
+    od_set = od_primary.groupby(['year',
+                                f'orig_{geography}',
+                                'study_area']).agg({'total':'sum',
+                                                    'goods':'sum',
+                                                    'transp':'sum',
+                                                    'other':'sum',}).reset_index()
+    return od_set
 
-od_set = od_primary.groupby(['year',
-                             'orig_tract',
-                             'study_area']).agg({'total':'sum',
-                                                 'goods':'sum',
-                                                 'transp':'sum',
-                                                 'other':'sum',}).reset_index()
 
 #get the percentage of total commuters for each OD pair year
-ods_set_list = []
-for each_year in od_set['year'].unique():
-    ods = od_set[od_set['year'] == each_year]
-    tm = ods.groupby('orig_tract').agg({'total':'sum'}).reset_index()
-    tm_dict = dict(zip(tm['orig_tract'],tm['total']))
-    ods['total_origin_lodes'] = ods['orig_tract'].map(tm_dict)
-    ods['proportion_of_origin_to_dest'] = ods.apply(lambda x: x['total']/tm_dict[x['orig_tract']],axis=1).fillna(0)
-    ods_set_list.append(ods)
+def adjust_od_set_by_year(od_set,geography='tract'):
+    ods_set_list = []
+    for each_year in od_set['year'].unique():
+        ods = od_set[od_set['year'] == each_year]
+        tm = ods.groupby(f'orig_{geography}').agg({'total':'sum'}).reset_index()
+        tm_dict = dict(zip(tm[f'orig_{geography}'],tm['total']))
+        ods['total_origin_lodes'] = ods[f'orig_{geography}'].map(tm_dict)
+        ods['proportion_of_origin_to_dest'] = ods.apply(lambda x: x['total']/tm_dict[x[f'orig_{geography}']],axis=1).fillna(0)
+        ods_set_list.append(ods)
 
-#pair with each for value
-od_set = pd.concat(ods_set_list)
+    #pair with each for value
+    od_set = pd.concat(ods_set_list)
 
-#pivot by year
-od_pivot = od_set.pivot(index=['orig_tract','study_area'],
-             columns=['year'],
-             values=['total','total_origin_lodes','proportion_of_origin_to_dest'])
+    #pivot by year
+    od_pivot = od_set.pivot(index=[f'orig_{geography}','study_area'],
+                columns=['year'],
+                values=['total','total_origin_lodes','proportion_of_origin_to_dest'])
 
-rev_columns = [f"{x[0]}_{x[1]}" for x in od_pivot.columns]
-od_pivot.columns = rev_columns
-od_pivot = od_pivot.reset_index().fillna(0)
+    rev_columns = [f"{x[0]}_{x[1]}" for x in od_pivot.columns]
+    od_pivot.columns = rev_columns
+    od_pivot = od_pivot.reset_index().fillna(0)
 
-#get the percentage of total commuters for each OD pair year
-ods_set_list = []
-for each_year in od_set['year'].unique():
-    ods = od_set[od_set['year'] == each_year]
-    tm = ods.groupby('orig_tract').agg({'total':'sum'}).reset_index()
-    tm_dict = dict(zip(tm['orig_tract'],tm['total']))
-    ods['total_origin_lodes'] = ods['orig_tract'].map(tm_dict)
-    ods['proportion_of_origin_to_dest'] = ods.apply(lambda x: x['total']/tm_dict[x['orig_tract']],axis=1).fillna(0)
-    ods_set_list.append(ods)
-
-#pair with each for value
-od_set = pd.concat(ods_set_list)
-
-#pivot by year
-od_pivot = od_set.pivot(index=['orig_tract','study_area'],
-             columns=['year'],
-             values=['total','total_origin_lodes','proportion_of_origin_to_dest'])
-
-rev_columns = [f"{x[0]}_{x[1]}" for x in od_pivot.columns]
-od_pivot.columns = rev_columns
-od_pivot = od_pivot.reset_index().fillna(0)
+    return od_pivot
 
 
-#adjusted destiantion for acs
-adj_dict = dict(zip(dfw_tdata['GEOID'],dfw_tdata['C24020_001E']))
-od_pivot['origin_total_acs_2023'] = od_pivot['orig_tract'].map(adj_dict)
+def adjust_to_acs(od_pivot,dfw_tdata):
+    #adjusted destiantion for acs
+    adj_dict = dict(zip(dfw_tdata['GEOID'],dfw_tdata['C24020_001E']))
+    od_pivot['origin_total_acs_2023'] = od_pivot['orig_tract'].map(adj_dict)
 
-#expected by different year 
-od_pivot['expected_from_2013_proportions_val_acs_2023'] = od_pivot['proportion_of_origin_to_dest_2013'].fillna(0) * od_pivot['origin_total_acs_2023'] 
-od_pivot['expected_from_2018_proportions_val_acs_2023'] = od_pivot['proportion_of_origin_to_dest_2018'].fillna(0) * od_pivot['origin_total_acs_2023'] 
-od_pivot['expected_from_2023_proportions_val_acs_2023'] = od_pivot['proportion_of_origin_to_dest_2023'].fillna(0) * od_pivot['origin_total_acs_2023'] 
+    #expected by different year 
+    od_pivot['expected_from_2013_proportions_val_acs_2023'] = od_pivot['proportion_of_origin_to_dest_2013'].fillna(0) * od_pivot['origin_total_acs_2023'] 
+    od_pivot['expected_from_2018_proportions_val_acs_2023'] = od_pivot['proportion_of_origin_to_dest_2018'].fillna(0) * od_pivot['origin_total_acs_2023'] 
+    od_pivot['expected_from_2023_proportions_val_acs_2023'] = od_pivot['proportion_of_origin_to_dest_2023'].fillna(0) * od_pivot['origin_total_acs_2023'] 
 
-#bring in geometry for origin
-t20 = pd.read_sql(r"select ST_AsText(geom) as geom_wkt, geoid from tracts_2020_geom",con=con)
-t20 = gpd.GeoDataFrame(t20,geometry=gpd.GeoSeries.from_wkt(t20['geom_wkt']),crs='epsg:4326')
-t20.drop(columns='geom_wkt',inplace=True)
+    return od_pivot
 
-sdata = t20.merge(od_pivot,left_on='GEOID',right_on='orig_tract')
-sdata = sdata.to_crs("EPSG:3857")
+def merge_in_geometry(od_pivot):
+    #bring in geometry for origin
+    t20 = pd.read_sql(r"select ST_AsText(geom) as geom_wkt, geoid from tracts_2020_geom",con=con)
+    t20 = gpd.GeoDataFrame(t20,geometry=gpd.GeoSeries.from_wkt(t20['geom_wkt']),crs='epsg:4326')
+    t20.drop(columns='geom_wkt',inplace=True)
+    sdata = t20.merge(od_pivot,left_on='GEOID',right_on='orig_tract',how='left').fillna(0)
+    sdata = sdata.to_crs("EPSG:3857")
+    return sdata
+
+#read in employment data and prepare dictioanries and OD data
+od_primary,cw_mapdict,city_mapdict,dfw_cw_blks,dfw_tdata = prep_employment_data()
+
+#assign tracts and cities
+od_primary = assign_tracts(od_primary,cw_mapdict,city_mapdict)
+
+#pull in and assign study areas
+od_primary_utsw = assign_study_area(od_primary,layer_name="UTSW_v1")
+od_primary_medcity = assign_study_area(od_primary,layer_name="MedicalCity_v1")
+od_primary_methodistftw= assign_study_area(od_primary,layer_name="MethodistFTW_v1")
+od_primary_presbydenton = assign_study_area(od_primary,layer_name="PresbyterianDenton_v1")
+
+#process data into dataset
+od_frames = {}
+for stuare in [od_primary_utsw,
+               od_primary_medcity,
+               od_primary_methodistftw,
+               od_primary_presbydenton]:
+    od_set = aggregate_to_origin(stuare, geography='tract')
+    od_pivot = adjust_od_set_by_year(od_set, geography='tract')
+    od_pivot = adjust_to_acs(od_pivot,dfw_tdata)
+    sdata = merge_in_geometry(od_pivot)
+    x = [y for y in list(od_pivot['study_area'].unique()) if y != 'not study area'][0]
+    od_frames[f"{x}_tract"] = sdata
+    
+    od_setc = aggregate_to_origin(stuare, geography='city')
+    od_pivotc = adjust_od_set_by_year(od_setc, geography='city')
+    od_frames[f"{x}_city"] = od_pivotc
 
 #save out
-sdata.to_file(r"C:\Users\cmg0530\Projects\lodes_north_texas\north_texas_lodes\Data Storage\Zones.gpkg",
-              layer="utsw_origin_zones_v1")
-
-#%% same analysis but for city
-#exclude the expected 
-
-od_set = od_primary.groupby(['year',
-                             'orig_city',
-                             'study_area']).agg({'total':'sum',
-                                                 'goods':'sum',
-                                                 'transp':'sum',
-                                                 'other':'sum',}).reset_index()
-
-#get the percentage of total commuters for each OD pair year
-ods_set_list = []
-for each_year in od_set['year'].unique():
-    ods = od_set[od_set['year'] == each_year]
-    tm = ods.groupby('orig_city').agg({'total':'sum'}).reset_index()
-    tm_dict = dict(zip(tm['orig_city'],tm['total']))
-    ods['total_origin_lodes'] = ods['orig_city'].map(tm_dict)
-    ods['proportion_of_origin_to_dest'] = ods.apply(lambda x: x['total']/tm_dict[x['orig_city']],axis=1).fillna(0)
-    ods_set_list.append(ods)
-
-#pair with each for value
-od_set = pd.concat(ods_set_list)
-
-#pivot by year
-od_pivot = od_set.pivot(index=['orig_city','study_area'],
-             columns=['year'],
-             values=['total','total_origin_lodes','proportion_of_origin_to_dest'])
-
-rev_columns = [f"{x[0]}_{x[1]}" for x in od_pivot.columns]
-od_pivot.columns = rev_columns
-od_pivot_city = od_pivot.reset_index().fillna(0)
+for x in od_frames.keys():
+    if 'tract' in x:
+        od_frames[x].to_file(r"C:\Users\cmg0530\Projects\lodes_north_texas\north_texas_lodes\Data Storage\Zones.gpkg",
+                    layer=x)
+    if 'city' in x:
+        od_frames[x].to_excel(r"C:\Users\cmg0530\Projects\lodes_north_texas\north_texas_lodes\Data Storage\CityLevelData.xlsx",
+                    sheet_name=x)
 
 
-#adjusted destiantion for acs
-#adj_dict = dict(zip(dfw_tdata['GEOID'],dfw_tdata['C24020_001E']))
-#od_pivot['origin_total_acs_2023'] = od_pivot['orig_tract'].map(adj_dict)
 
-#expected by different year 
-#od_pivot['expected_from_2013_proportions_val_acs_2023'] = od_pivot['proportion_of_origin_to_dest_2013'].fillna(0) * od_pivot['origin_total_acs_2023'] 
-#od_pivot['expected_from_2018_proportions_val_acs_2023'] = od_pivot['proportion_of_origin_to_dest_2018'].fillna(0) * od_pivot['origin_total_acs_2023'] 
-#od_pivot['expected_from_2023_proportions_val_acs_2023'] = od_pivot['proportion_of_origin_to_dest_2023'].fillna(0) * od_pivot['origin_total_acs_2023'] 
-
-od_pivot_city[od_pivot_city['study_area'] == 'utsw'].sort_values(by='proportion_of_origin_to_dest_2023',ascending=False)
-
-od_pivot_city[od_pivot_city['study_area'] == 'utsw'].sort_values(by='proportion_of_origin_to_dest_2013',ascending=False)
-
-od_pivot_city.to_excel(r"C:\Users\cmg0530\Projects\lodes_north_texas\north_texas_lodes\Data Storage\utsw_by_city.xlsx")
+#%%random extraneous mapping
 
 import mapclassify
 import matplotlib.patheffects as pe
