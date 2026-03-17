@@ -6,6 +6,7 @@ from census_pulls import *
 import pandas as pd
 import os
 import geopandas as gpd
+import numpy as np
 
 #connect to od
 spath = r"C:\Users\cmg0530\Projects\lodes_package\lodes_tx_slim.db"
@@ -170,14 +171,110 @@ for x in od_frames.keys():
 #read and process lc data
 lc = pd.read_csv(r"C:\Users\cmg0530\Projects\lodes_north_texas\north_texas_lodes\Data Storage\lightcast_zcta_health.csv")
 lc['ZCTA'] = lc['Area'].astype(str)
+
+def format_for_ratios(lc):
+    pivotye = lc.pivot(index=['ZCTA'],columns=['Occupation',"Year"],values='Resident Workers')
+    pivotye.columns = [f"{x[0]}_{x[1]}" for x in pivotye.columns]
+    pivotye = pivotye.reset_index()
+    return pivotye
+
+lc2 = format_for_ratios(lc)
+
+#read geoms
 z20 = pd.read_sql(r"select ST_AsText(geom) as geom_wkt, GEOID20 as GEOID from zcta_2020_geom",con=con)
 z20 = gpd.GeoDataFrame(z20,geometry=gpd.GeoSeries.from_wkt(z20['geom_wkt']),crs='epsg:4326')
 z20.drop(columns='geom_wkt',inplace=True)
-lcsdata = z20.merge(lc,left_on='GEOID',right_on=f'ZCTA',how='inner').fillna(0)
+z20dfw = z20[z20['GEOID'].isin(dfw_zdata['GEOID'])].copy()
+
+lcsdata = z20dfw.merge(lc2,left_on='GEOID',right_on=f'ZCTA',how='inner').fillna(0)
 lcsdata = lcsdata.to_crs("EPSG:3857")
-lcsdata['Resident Workers']= lcsdata['Resident Workers'].astype(float,errors='ignore').fillna(0)
+for x in lcsdata.columns:
+    if x not in ['GEOID','geometry']:
+        lcsdata[x]= lcsdata[x].astype(float,errors='ignore').fillna(0)
 lcsdata.to_file(r"C:\Users\cmg0530\Projects\lodes_north_texas\north_texas_lodes\Data Storage\Zones.gpkg",
-                    layer=f"zcta_lightcast_data")
+                    layer=f"zcta_lightcast_data_columnar")
+
+
+
+def calculate_tiers(tier_1_occs,tier_2_occs,tier_3_occs,tier_name,year,lcsdata,tier_4_occs=None):
+    lcsdata[f'{tier_name}_tier1_2025'] = lcsdata[[f"{y}_{year}" for y in tier_1_occs]].sum(axis=1)
+    lcsdata[f'{tier_name}_tier2_2025'] = lcsdata[[f"{y}_{year}" for y in tier_2_occs]].sum(axis=1)
+    lcsdata[f'{tier_name}_tier3_2025'] = lcsdata[[f"{y}_{year}" for y in tier_3_occs]].sum(axis=1)
+    if tier_4_occs != None:
+        lcsdata[f'{tier_name}_tier4_2025'] = lcsdata[[f"{y}_{year}" for y in tier_4_occs]].sum(axis=1)
+    return lcsdata
+
+
+#nursing occupation tiers
+#tier 1: CNA  31-1131
+#tier 2: LVN 29-2061
+#tier 3: RN 29-1141
+#tier 4: Nurse Practicioner 29-1171
+tier_1_occs = ['31-1131']
+tier_2_occs = ['29-2061']
+tier_3_occs = ['29-1141']
+tier_4_occs = ['29-1171']
+tier_name = 'nursing'
+year = '2025'
+lcsdata_nursing = calculate_tiers(tier_1_occs=tier_1_occs,
+                                  tier_2_occs=tier_2_occs,
+                                  tier_3_occs=tier_3_occs,
+                                  tier_4_occs=tier_4_occs,
+                                  tier_name=tier_name,
+                                  year=year,
+                                  lcsdata=lcsdata)
+
+
+
+#tier 1: medical assistant, orderlies 31-9092, 31-1132
+#tier 2: cardiovascular tech + surgical technologist 29-2031, 29-2055
+#tier 3: phyisician assistant 29-1071
+tier_1_occs = ['31-9092','31-1132']
+tier_2_occs = ['29-2031','29-2055']
+tier_3_occs = ['29-1071']
+tier_4_occs = None
+tier_name = 'surgery'
+year = '2025'
+lcsdata_surgery = calculate_tiers(tier_1_occs=tier_1_occs,
+                                  tier_2_occs=tier_2_occs,
+                                  tier_3_occs=tier_3_occs,
+                                  tier_4_occs=tier_4_occs,
+                                  tier_name=tier_name,
+                                  year=year,
+                                  lcsdata=lcsdata)
+
+
+def tier_ratio(lcsdata, tier_name,year):
+
+    cols = [y for y in lcsdata.columns if tier_name in y]
+    tiers = []
+    for q in cols:
+        tiers.append(q.split("_")[-2])
+    #what are the ratios
+    
+    #ratio 1 
+    lcsdata[f"{tier_name}_ratio_t2_t1_{year}"] = (lcsdata[f"{tier_name}_tier1_{year}"]/lcsdata[f"{tier_name}_tier2_{year}"]).fillna(0).replace(np.inf,0)
+    #tier 2 to tier 1
+
+    #ratio 2
+    lcsdata[f"{tier_name}_ratio_t3_t1t2_{year}"] = ((lcsdata[f"{tier_name}_tier1_{year}"]+lcsdata[f"{tier_name}_tier2_{year}"])/lcsdata[f"{tier_name}_tier3_{year}"]).fillna(0).replace(np.inf,0)
+    #tier 3 to tier 1 + 2
+    
+    #optional
+    if "tier4" in tiers:
+        #tier 4 to tier 1 + 2 + 3
+        lcsdata[f"{tier_name}_ratio_t4_t1t2t3_{year}"] = ((lcsdata[f"{tier_name}_tier1_{year}"]+lcsdata[f"{tier_name}_tier2_{year}"]+lcsdata[f"{tier_name}_tier3_{year}"])/lcsdata[f"{tier_name}_tier4_{year}"]).fillna(0).replace(np.inf,0)
+    
+    return lcsdata
+
+lcs_nursing = tier_ratio(lcsdata=lcsdata_nursing,tier_name='nursing',year='2025')
+lcs_surgery = tier_ratio(lcsdata=lcsdata_surgery,tier_name='surgery',year='2025')
+
+lcs_surgery.to_file(r"C:\Users\cmg0530\Projects\lodes_north_texas\north_texas_lodes\Data Storage\Zones.gpkg",
+                    layer=f"Employment_Ratios_Surgery_v1")
+lcs_nursing.to_file(r"C:\Users\cmg0530\Projects\lodes_north_texas\north_texas_lodes\Data Storage\Zones.gpkg",
+                    layer=f"Employment_Ratios_Nursing_v1")
+
 #%%random extraneous mapping
 
 import mapclassify
